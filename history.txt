@@ -1,2 +1,2 @@
 #V2
-cargo build
+q

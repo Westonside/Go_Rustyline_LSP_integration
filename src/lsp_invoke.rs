@@ -2,11 +2,12 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 use std::{string, thread};
+use std::fmt::format;
 use tower_lsp::{jsonrpc,Client};
 use lsp_types::{DidOpenTextDocumentParams, InitializeParams, lsp_request, TextDocumentItem, Url};
 use lsp_types::notification::{DidOpenTextDocument, Initialized};
 use serde_json::{json, Result, Value};
-use tower_lsp::jsonrpc::Id::{Number, String};
+use tower_lsp::jsonrpc::Id::{Null, Number};
 // use tower_lsp::jsonrpc::Request;
 use std::str;
 use lsp_types::request::{Initialize, Request};
@@ -17,7 +18,9 @@ use tower_lsp::jsonrpc::RequestBuilder;
 
 // cmd := exec.Command("cargo", "run", "--manifest-path", "./flux-lsp/Cargo.toml")
 
-
+fn add_headers(a: String) -> String{
+    format!("Content-Length: {}\r\n\r\n{}", a.len(), a)
+}
 pub fn invoke_lsp() {
     let mut child = Command::new("cargo")
         .arg("run")
@@ -55,19 +58,23 @@ pub fn invoke_lsp() {
 
 
     let a = req.params(serde_json::to_value(&params).unwrap());
-    let mut fin =  a.finish();
+    let b  = a.id(Number(1));
 
+    let mut fin =  b.finish();
+    let fin_j = serde_json::to_value(fin).unwrap();
+    let headed = add_headers(serde_json::to_string(&fin_j).unwrap());
+    //need to add headers
 
 
     // req.id()
-    println!("{:?} serde", serde_json::to_string(&fin).unwrap());
+    println!("{} serde", headed);
 
 
 
 
 
     //generates the body
-    println!("slmetning test {}", serde_json::to_string(&params).unwrap());
+    // println!("slmetning test {}", serde_json::to_string(&params).unwrap());
     //add the header
 
 
@@ -79,7 +86,7 @@ pub fn invoke_lsp() {
             use std::io::BufRead;
             let reader = BufReader::new(child_stdout);
             for line in reader.lines() {
-                println!("tes {}", line.unwrap());
+                println!("{}", line.unwrap());
             }
         });
 
@@ -88,7 +95,7 @@ pub fn invoke_lsp() {
         scope.execute(move ||
             // println!("test")
             //               r#"{"jsonrpc": "2.0", "method": "say_hello", "params": [42, 23], "id": 1}"#;
-            writeln!(&mut child_stdin, "{}", serde_json::to_string(&params).unwrap()).unwrap()
+            writeln!(&mut child_stdin, "{}", headed).unwrap()
             //           writeln!(&mut child_stdin, "{}", r#"{"jsonrpc": "2.0", "method": "say_hello", "params": [42, 23], "id": 1}"#).unwrap()
 
                       // writeln!(&mut child_stdin, "{}", a).unwrap();
