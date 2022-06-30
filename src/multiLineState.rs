@@ -1,12 +1,12 @@
 
 pub struct MultiLineState{
-    list: Vec<String>
+    list: Vec<String>,
 }
 
 impl MultiLineState  {
     pub fn new() -> Self {
         MultiLineState {
-            list: Vec::new()
+            list: Vec::new(),
         }
     }
 
