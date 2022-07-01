@@ -5,8 +5,8 @@ use std::{string, thread};
 use std::fmt::{Debug, format};
 use std::ptr::write;
 use tower_lsp::{jsonrpc,Client};
-use lsp_types::{DidOpenTextDocumentParams, InitializedParams, InitializeParams, lsp_request, TextDocumentItem, Url};
-use lsp_types::notification::{DidOpenTextDocument, Initialized, Notification};
+use lsp_types::{DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializedParams, InitializeParams, lsp_request, TextDocumentContentChangeEvent, TextDocumentItem, Url, VersionedTextDocumentIdentifier};
+use lsp_types::notification::{DidChangeTextDocument, DidOpenTextDocument, Initialized, Notification};
 use serde_json::{json, json_internal, Value};
 use serde_json::Result as Result_Json;
 
@@ -92,11 +92,7 @@ pub fn formulate_request (request_type: &str, text: &str)-> Result<String,LSP_Er
 
                 }).unwrap());
             Ok(add_headers(req.finish().to_string()))
-            // let params_two =
-            // let mut reqs  = jsonrpc::Request::build(Initialized::METHOD);
-            // let parammed = reqs.params(serde_json::to_value(&params_two).unwrap());
-            // let asdf = parammed.finish();
-            // let fin_two = add_headers(asdf.to_string());
+
         }
 
         "didOpen" => {
@@ -115,6 +111,23 @@ pub fn formulate_request (request_type: &str, text: &str)-> Result<String,LSP_Er
 
             let headed = add_headers(serde_json::to_string(&a)?);
 
+            Ok(headed)
+        },
+        "didChange" =>{
+            let req: RequestBuilder = jsonrpc::Request::build(DidChangeTextDocument::METHOD).params(serde_json::to_value(
+                DidChangeTextDocumentParams{
+                    text_document: VersionedTextDocumentIdentifier { uri: (Url::parse("file:///foo.flux").unwrap()), version: 0 },
+                    content_changes: vec![TextDocumentContentChangeEvent{
+                        range: None,
+                        range_length: None,
+                        text: text.to_string()
+                    }]
+                })?);
+            println!("i am reaching gthe line {}",text );
+            let a = serde_json::to_value(req.finish())?;
+
+            let headed = add_headers(serde_json::to_string(&a)?);
+            println!("headed for the didchange {}", headed);
             Ok(headed)
         }
         _ => {
