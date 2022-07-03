@@ -96,7 +96,7 @@ pub fn formulate_request (request_type: &str, text: &str)-> Result<String,LSP_Er
         }
 
         "didOpen" => {
-            println!("getting here ");
+            // println!("getting here ");
             let req: RequestBuilder = jsonrpc::Request::build(DidOpenTextDocument::METHOD).params(serde_json::to_value(
                 DidOpenTextDocumentParams {
                     text_document: TextDocumentItem {
@@ -123,11 +123,11 @@ pub fn formulate_request (request_type: &str, text: &str)-> Result<String,LSP_Er
                         text: text.to_string()
                     }]
                 })?);
-            println!("i am reaching gthe line {}",text );
+            // println!("i am reaching gthe line {}",text );
             let a = serde_json::to_value(req.finish())?;
 
             let headed = add_headers(serde_json::to_string(&a)?);
-            println!("headed for the didchange {}", headed);
+            // println!("headed for the didchange {}", headed);
             Ok(headed)
         }
         _ => {
