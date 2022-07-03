@@ -211,7 +211,7 @@ fn newMain() -> Result<()>{
 
 
             //inintalize
-            while(res.len() != 0){
+            while res.len() != 0 {
                 if reader_block_p.load(Ordering::Relaxed){
                     thread::sleep(Duration::from_millis(1));
                 }
