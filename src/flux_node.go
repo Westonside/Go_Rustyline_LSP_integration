@@ -23,6 +23,7 @@ type Input struct {
 func main() {
 	print("hello world!")
 	reader := bufio.NewReader(os.Stdin)
+	// functwo()
 
 	for true {
 		line, _, _ := reader.ReadLine()

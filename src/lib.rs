@@ -1,18 +1,20 @@
 mod multiLineState;
-mod lsp_invoke;
+// mod invoke_go;
+mod processes;
+
 use std::sync::mpsc::channel;
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, mpsc};
 use std::string::String;
 use std::borrow::Cow;
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::borrow::Cow::{Borrowed, Owned};
-use std::collections::VecDeque;
-// use std::intrinsics::atomic_and;
-// use std::io::{BufRead, BufReader};
+use std::collections::{HashSet, VecDeque};
+use crate::processes::{start_go, invoke_go};
 use std::io::{self, BufRead};
 use std::ops::Add;
 use std::str;
+
 
 // use std::simd::usizex2;
 
@@ -20,73 +22,222 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use regex::{Captures, Regex};
 use std::time::Duration;
-// use lsp_types::MarkedString::String;
-// use std::si md::Mask;
-use rustyline_derive::{Completer, Helper, Highlighter, Hinter, Validator};
+
+// use rustyline_derive::{Completer, Helper, Highlighter, Hinter, Validator};
 use rustyline::error::ReadlineError;
 // use rustyline::{Editor, Event, EventHandler, KeyEvent, Result};
 use rustyline::highlight::Highlighter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 // use rustyline::{Editor, , Result};
-use rustyline::{
-    Cmd, ConditionalEventHandler, Editor, Event, EventContext, EventHandler, KeyCode, KeyEvent,
-    Modifiers, RepeatCount, Result,
-};
+use rustyline::{Cmd, Config, CompletionType, ConditionalEventHandler, Context, EditMode, Editor, Event, EventContext, EventHandler, KeyCode, KeyEvent, Modifiers, RepeatCount, Result};
+use rustyline::completion::Completer;
+use rustyline::hint::{Hint, Hinter, HistoryHinter};
 use multiLineState::MultiLineState;
-use crate::lsp_invoke::{formulate_request, generate_chores, send_request, start_lsp};
+use processes::lsp_invoke::{formulate_request, send_request, start_lsp};
 
 
-// struct FilteringEventHandler;
-// impl ConditionalEventHandler for FilteringEventHandler {
-//     fn handle(&self, evt: &Event, _: RepeatCount, _: bool, _: &EventContext) -> Option<Cmd> {
-//         if let Some(KeyEvent(KeyCode::Char(c), m)) = evt.get(0) {
-//             if m.contains(Modifiers::CTRL) || m.contains(Modifiers::ALT) || c.is_ascii_digit() {
-//                 None
+
+// #[derive(Completer, Helper, Hinter, Validator)]
+// struct  MaskingHighlighter {
+//     masking: bool,
+//     sending: Sender<String>
+// }
+//
+//
+//
+// #[derive(Helper, Completer, Hinter, Validator, Highlighter)]
+// struct MyHelper {
+//     highlighter: MaskingHighlighter,
+//     completer: CompleteHintHandler,
+//     third: HistoryHinterTwo
+// }
+//
+//
+// #[derive(Clone)]
+// struct CompleteHintHandler;
+// impl ConditionalEventHandler for CompleteHintHandler {
+//     fn handle(&self, evt: &Event, _: RepeatCount, _: bool, ctx: &EventContext) -> Option<Cmd> {
+//         if !ctx.has_hint() {
+//             return None; // default
+//         }
+//         if let Some(k) = evt.get(0) {
+//             #[allow(clippy::if_same_then_else)]
+//             if *k == KeyEvent::ctrl('E') {
+//                 Some(Cmd::CompleteHint)
+//             } else if *k == KeyEvent::alt('f') && ctx.line().len() == ctx.pos() {
+//                 let text = ctx.hint_text()?;
+//                 let mut start = 0;
+//                 if let Some(first) = text.chars().next() {
+//                     if !first.is_alphanumeric() {
+//                         start = text.find(|c: char| c.is_alphanumeric()).unwrap_or_default();
+//                     }
+//                 }
+//
+//                 let text = text
+//                     .chars()
+//                     .enumerate()
+//                     .take_while(|(i, c)| *i <= start || c.is_alphanumeric())
+//                     .map(|(_, c)| c)
+//                     .collect::<String>();
+//
+//                 Some(Cmd::Insert(1, text))
 //             } else {
-//                 Some(Cmd::Noop) // filter out invalid input
+//                 None
 //             }
 //         } else {
-//             None
+//             unreachable!()
 //         }
 //     }
 // }
+//
+// struct TabEventHandler;
+// impl ConditionalEventHandler for TabEventHandler {
+//     fn handle(&self, evt: &Event, n: RepeatCount, _: bool, ctx: &EventContext) -> Option<Cmd> {
+//         debug_assert_eq!(*evt, Event::from(KeyEvent::from('\t')));
+//         if ctx.line()[..ctx.pos()]
+//             .chars()
+//             .rev()
+//             .next()
+//             .filter(|c| c.is_whitespace())
+//             .is_some()
+//         {
+//             Some(Cmd::SelfInsert(n, '\t'))
+//         } else {
+//             None // default complete
+//         }
+//     }
+// }
+//
+//
+//
+//
+//
+// impl Highlighter for MaskingHighlighter {
+//     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+//             self.sending.send(line.to_string()).expect("TODO: panic message");
+//             Borrowed(line)
+//
+//     }
+//
+//     fn highlight_char(&self, _line: &str, _pos: usize) -> bool {
+//
+//         self.masking
+//     }
+// }
+use rustyline_derive::{Completer, Helper, Validator};
 
 
-#[derive(Completer, Helper, Hinter, Validator)]
-struct  MaskingHighlighter {
-    masking: bool,
-    sending: Sender<String>
+#[derive(Completer, Helper, Validator)]
+struct MyHelper(HistoryHinter);
+
+impl Hinter for MyHelper {
+    type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
+        self.0.hint(line, pos, ctx)
+    }
 }
 
-impl Highlighter for MaskingHighlighter {
-    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-            self.sending.send(line.to_string()).expect("TODO: panic message");
-            Borrowed(line)
-
+impl Highlighter for MyHelper {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        prompt: &'p str,
+        default: bool,
+    ) -> Cow<'b, str> {
+        if default {
+            Owned(format!("\x1b[1;32m{}\x1b[m", prompt))
+        } else {
+            Borrowed(prompt)
+        }
     }
 
-    fn highlight_char(&self, _line: &str, _pos: usize) -> bool {
-
-        self.masking
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        Owned(format!("\x1b[1m{}\x1b[m", hint))
     }
 }
+
+#[derive(Clone)]
+struct CompleteHintHandler;
+impl ConditionalEventHandler for CompleteHintHandler {
+    fn handle(&self, evt: &Event, _: RepeatCount, _: bool, ctx: &EventContext) -> Option<Cmd> {
+        if !ctx.has_hint() {
+            return None; // default
+        }
+        if let Some(k) = evt.get(0) {
+            #[allow(clippy::if_same_then_else)]
+            if *k == KeyEvent::ctrl('E') {
+                Some(Cmd::CompleteHint)
+            } else if *k == KeyEvent::alt('f') && ctx.line().len() == ctx.pos() {
+                let text = ctx.hint_text()?;
+                let mut start = 0;
+                if let Some(first) = text.chars().next() {
+                    if !first.is_alphanumeric() {
+                        start = text.find(|c: char| c.is_alphanumeric()).unwrap_or_default();
+                    }
+                }
+
+                let text = text
+                    .chars()
+                    .enumerate()
+                    .take_while(|(i, c)| *i <= start || c.is_alphanumeric())
+                    .map(|(_, c)| c)
+                    .collect::<String>();
+
+                Some(Cmd::Insert(1, text))
+            } else {
+                None
+            }
+        } else {
+            unreachable!()
+        }
+    }
+}
+
+struct TabEventHandler;
+impl ConditionalEventHandler for TabEventHandler {
+    fn handle(&self, evt: &Event, n: RepeatCount, _: bool, ctx: &EventContext) -> Option<Cmd> {
+        debug_assert_eq!(*evt, Event::from(KeyEvent::from('\t')));
+        if ctx.line()[..ctx.pos()]
+            .chars()
+            .rev()
+            .next()
+            .filter(|c| c.is_whitespace())
+            .is_some()
+        {
+            Some(Cmd::SelfInsert(n, '\t'))
+        } else {
+            None // default complete
+        }
+    }
+}
+
+
 
 
 fn newMain() -> Result<()>{
-    //ISSUE AT THE MOMENT: reader is not reading the full response of the lsp response so it is behind somewhat
-    //spawn the child
-    let mut child = start_lsp();
-    //send the first responses to the writer thread
-    //the writer thread will have a channel with a vec that contains the starting commands
-    //TODO: writer thread to the lsp
-    //TODO: reader thread for the lsp
-    //TODO: reader thread between rusty-line that then processes the request and send to the writer thread
+    let config = rustyline::Config::builder()
+        .history_ignore_space(true)
+        .completion_type(CompletionType::List)
+        // .edit_mode(EditMode::Emacs)
+        .build();
 
 
     //reading from rustyline input
     let (tx_stdin, rx_read_stdin): (Sender<String>, Receiver<String>) = channel();
     //sending the processed data onwards
     let (tx_processed, rx_processed): (Sender<String>, Receiver<String>) = channel();
+    //sending from when user presses enter
+    let (tx_user, rx_user): (Sender<String>, Receiver<String>) = channel();
+
+    //TODO: ADD BACK IN
+    // let ha = MyHelper{
+    //     highlighter: MaskingHighlighter {masking: true, sending: tx_stdin},
+    //     completer: CompleteHintHandler{},
+    //     third: MyHelperTwo
+    // };
+
+
+
 
 
     let mut reader_block = Arc::new(AtomicBool::new(false));
@@ -94,21 +245,42 @@ fn newMain() -> Result<()>{
     let mut reader_block_p = Arc::clone(&reader_block);
 
 
-
-
-
-
-
     //spawning the editor with paste mode
     let mut paste: bool = false;
     let mut paste_state = MultiLineState::new();
-    let mut rl = Editor::new();
+    // let mut rl = Editor::new();
+    //TODO: ADD BACK
+    // let mut rl = Editor::with_config(config);
+
+    let mut rl = Editor::<MyHelper>::new();
+    rl.set_helper(Some(MyHelper(HistoryHinter {})));
+    let ceh = Box::new(CompleteHintHandler);
+    rl.bind_sequence(KeyEvent::ctrl('E'), EventHandler::Conditional(ceh.clone()));
+    rl.bind_sequence(KeyEvent::alt('f'), EventHandler::Conditional(ceh));
+    rl.bind_sequence(
+        KeyEvent::from('\t'),
+        EventHandler::Conditional(Box::new(TabEventHandler)),
+    );
+
+
+    // let h = DIYHinter {hints: diy_hints()};
+    // let mut rl: Editor<DIYHinter> = Editor::new();
+    // rl.set_helper(Some(h));
+
+
+
+    //TODO: ADD BACK
+    // rl.set_helper(Some(ha));
+    // rl.set_helper(Some(MyHelper(HistoryHinter{})));
     //helper
-    let h = MaskingHighlighter {masking: true, sending: tx_stdin};
-    rl.set_helper(Some(h));
+    // let h = MaskingHighlighter {masking: true, sending: tx_stdin};
+    // rl.set_helper(Some(h));
 
     //spawn the lsp
     let mut child = start_lsp();
+    //spawn the flux runner
+    let mut flux_child = start_go();
+
 
     //thread handler
     let mut thread_handlers = vec![];
@@ -125,6 +297,7 @@ fn newMain() -> Result<()>{
                     thread::sleep(Duration::from_millis(10));
                 }
                 let resp = rx_processed.recv().expect("failure getting from processor thread");
+                // println!("{}", resp);
                 write!(&mut child_stdin, "{}", resp).unwrap();
                 reader_block_w.swap(true, Ordering::Relaxed);
 
@@ -133,72 +306,37 @@ fn newMain() -> Result<()>{
     );
 
 
-    //(b"<string>")
     //read from the LSP thread that will give the suggestions
-    let mut child_stdout =  child.stdout.take().expect("failure getting the stdout");
-    // let mut cursor = io::Cursor::new(child_stdout.);
     thread_handlers.push(
         thread::spawn(move||{
-            let re = Regex::new(r"Content-Length: ").unwrap();
-            let num = Regex::new(r"\d").unwrap();
-                    let mut buf: Vec<u8> = vec![];
-                    let mut num_buf: Vec<u8> = vec![];
-                    let mut x = 0;
-                    let mut y = 0;
-                    //indicate when to start and stop capturing numbers in the content length
-                    let mut num_cap = false;
-                    let mut read_exact = (false,0);
-                    for i in child_stdout.bytes() {
-                        let val = i.unwrap();
-                        let single = [val];
-                        if read_exact.0{
-                            buf.insert(buf.len(),val);
-                            read_exact.1 = read_exact.1 - 1;
-                            if read_exact.1 == 0{
-                                println!("full response {}", str::from_utf8(&buf).unwrap());
-                                read_exact.0 = false;
-                                // break;
-                            }
-                            continue;
-                        }
-
-                        let a = str::from_utf8(&single).unwrap();
-                        //if capturing numbers and the value is numeric add to number buffer
-                        if num_cap && num.is_match(a) {
-                            num_buf.insert(num_buf.len(), val);
-                        } else {
-                            if num_cap {
-                                //indicate you need to take that number and read that many bytes
-                                num_cap = false;
-                                buf.clear();
-                                let read = str::from_utf8(&num_buf).unwrap();
-                                println!("that is the number read! !! {}a", read);
-                                //now read that many characters
-                                let mut my_int: u16 = read.parse().unwrap();
-                                //3 being the \r\n\n in the header
-                                my_int = my_int+3;
-                                read_exact.0 = true;
-                                read_exact.1 = my_int;
-                                num_buf.clear();
-
-                                //read that many bytes and go again
-                                // let mut resp = Vec::with_capacity(my_int as usize);
-
-                                // break;
-                            }
-                            buf.insert(buf.len(), val);
-                        }
-                        let cur = str::from_utf8(&buf).unwrap();
-                        let cl = str::from_utf8(&num_buf).unwrap();
-                        x = x + 1;
-                        y = y + 1;
-                        if !re.captures(cur).is_none(){
-                            num_cap = true;
-                        }
-
-                    }
+            invoke_go::read_json_rpc(child.stdout.take().expect("failure getting the stdout"));
         })
     );
+
+    // getting when the user presses enter to send to the flux runner
+    let mut flux_stdin = flux_child.stdin.take().expect("failure getting the stdin of the flux");
+    thread_handlers.push(
+        thread::spawn(move||{
+            loop {
+                let resp = rx_user.recv().expect("Failure receiving the user's input");
+                //format what is received
+                let message = invoke_go::form_output("Service.DidOutput", &resp).expect("failure making message for flux");
+                write!(flux_stdin, "{}" ,message).expect("failed to write to the flux run time");
+            }
+        })
+    );
+
+    let mut flux_stdout = flux_child.stdout.take().expect("failure getting the stoud of the flux");
+    let reader = BufReader::new(flux_stdout);
+    thread_handlers.push(
+        thread::spawn(move||{
+            for line in reader.lines(){
+                println!("{}", line.unwrap())
+            }
+        })
+    );
+
+
 
 
     //processing thread that will send to the writer thread after processing into a request
@@ -207,9 +345,6 @@ fn newMain() -> Result<()>{
     let mut res = init.iter().map(|x| formulate_request(x, "").unwrap()).collect::<VecDeque<String>>();
     thread_handlers.push(
         thread::spawn(move||{
-
-
-
             //inintalize
             while res.len() != 0 {
                 if reader_block_p.load(Ordering::Relaxed){
@@ -223,16 +358,8 @@ fn newMain() -> Result<()>{
             }
             //getting data from the user thread read from the reading
             loop{
-                // if reader_block_p.load(Ordering::Relaxed){
-                //     thread::sleep(Duration::from_millis(10));
-                // }
-                // let input = rx_user.recv().expect("failure receiving from the user input thread");
                 let input = rx_read_stdin.recv().expect("failure reading from the user");
-                //create a document change request from the input and capture the line
                 tx_processed.send(formulate_request("didChange", &input).expect("incorrect request type in processor")).expect("failure sending to writer thread pt 2");
-                // println!("i am here processor");
-                // thread::sleep(Duration::from_millis(1));
-
             }
 
         })
@@ -245,16 +372,22 @@ fn newMain() -> Result<()>{
         match readline {
             Ok(line) => {
 
-                rl.add_history_entry(line.as_str());
+                // rl.add_history_entry(line.as_str());
                 if paste {
                     //add the line to the multiline state
-                    rl.helper_mut().expect("No helper").masking = true;
+                    //TODO: ADD BACK IN
+                    // rl.helper_mut().unwrap().highlighter.masking = true;
+
 
                     paste_state.addRecord(line.to_string());
 
                 }
 
                 println!("Line: {}", line);
+                rl.add_history_entry(line.as_str());
+                if !paste{
+                    tx_user.send(line).expect("Failure getting user input!");
+                }
 
             },
             Err(ReadlineError::Interrupted) => {
@@ -268,7 +401,7 @@ fn newMain() -> Result<()>{
 
                 if !paste && paste_state.entries() > 0 {
                     // rl.helper_mut().expect("No helper").masking = true;
-                    rl.add_history_entry(paste_state.resultString());
+                    // rl.add_history_entry(paste_state.resultString());
                 }
                 //clear the vec
                 if paste == false{
@@ -286,8 +419,10 @@ fn newMain() -> Result<()>{
     for h in thread_handlers{
         h.join().expect("joining failed");
     }
-    rl.save_history("history.txt")
 
+    // rl.save_history("history.txt")
+
+    Ok(())
 
     // Ok(())
 }

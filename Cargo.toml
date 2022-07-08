@@ -11,7 +11,7 @@ crate-type = ["staticlib"]
 
 
 [dependencies]
-rustyline = "9.1.0"
+rustyline = "9.1.2"
 base64 = "0.13.0"
 tower-lsp = "0.17.0"
 lsp-types = "0.93.0"
