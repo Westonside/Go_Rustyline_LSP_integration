@@ -58,7 +58,7 @@ impl From<serde_json::Error> for OutputError{
                 let req: RequestBuilder = jsonrpc::Request::build("Service.DidOutput").params(paramm);
                 let a = serde_json::to_value(req.finish())?;
                 let res = serde_json::to_string(&a).unwrap();
-                println!("{}", res);
+                // println!("{}", res);
                 // {"jsonrpc":"2.0", "method": "Service.DidOutput", "id": "1", "title":"testing","body":"dog", "params":[{"input":"x=1"}]}
                 Ok(res)
             }

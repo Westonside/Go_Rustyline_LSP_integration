@@ -1,5 +1,19 @@
 package tests
 
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/rpc"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+
 type Args struct {
 	A, B int
 }
@@ -25,3 +39,4 @@ func (t *Arith) Mul(args *Args, reply *Reply) error {
 	reply.C = args.A * args.B
 	return nil
 }
+
