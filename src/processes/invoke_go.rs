@@ -86,6 +86,7 @@ impl From<serde_json::Error> for OutputError{
                 buf.insert(buf.len(), val);
                 read_exact.1 = read_exact.1 - 1;
                 if read_exact.1 == 0 {
+                    //final result
                     println!("{}", str::from_utf8(&buf).unwrap());
                     read_exact.0 = false;
                     // break;
