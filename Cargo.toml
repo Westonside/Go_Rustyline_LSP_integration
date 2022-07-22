@@ -7,8 +7,10 @@ edition = "2021"
 
 [lib]
 name = "caller"
-crate-type = ["staticlib"]
 
+[[bin]]
+name = "repl"
+path = "src/main.rs"
 
 [dependencies]
 rustyline = "9.1.2"
