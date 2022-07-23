@@ -34,7 +34,7 @@ impl Hint for CommandHint {
 
 
 impl CommandHint {
-    fn new(text: &str, complete_up_to: &str) -> CommandHint {
+    pub fn new(text: &str, complete_up_to: &str) -> CommandHint {
         assert!(text.starts_with(complete_up_to));
         CommandHint {
             display: text.into(),

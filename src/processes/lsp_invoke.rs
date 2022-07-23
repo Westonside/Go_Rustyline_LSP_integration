@@ -32,30 +32,10 @@ use std::string::ParseError;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use tower_lsp::jsonrpc::{Method, RequestBuilder};
-// use async_process::{Command, Stdio};
-// use futures_lite::{io::BufReader, prelude::*};
 
-// cmd := exec.Command("cargo", "run", "--manifest-path", "./flux-lsp/Cargo.toml")
-
-//LOOK at Rustyline event handler
-//reading input as it inputted get a response back and get back into rustyline as to make a suggestion
-//implement with channels
-//experiment for each key stroke send to lsp bit
-
-//getting back to Go stdin
-
-//real messages to the lps
-//document state
 
 pub fn add_headers(a: String) -> String {
     format!("Content-Length: {}\r\n\r\n{}", a.len(), a)
-}
-
-fn process_response(a: &str) {
-    // println!("testing 123 {} test", a);
-    let js: Value = serde_json::to_value(a).unwrap();
-    let result = js.get("result");
-    // println!("{:?} result ", result);
 }
 
 #[derive(Debug)]
@@ -251,15 +231,9 @@ pub fn formulate_request(request_type: &str, text: &str) -> Result<String, LSP_E
     }
 }
 
-pub fn send_request(mut child: Child, request: String) {
-    let mut child_stdin = child.stdin.as_mut().unwrap();
 
-    write!(child_stdin, "{}", request).unwrap();
-}
 
-// pub fn start_lsp() -> TcpStream {
-//     TcpStream::connect("127.0.0.1:5001").unwrap()
-// }
+
 pub fn start_lsp() -> Child {
     //step one: start the process
     let mut child = Command::new("flux-lsp")

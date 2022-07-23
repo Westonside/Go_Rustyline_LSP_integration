@@ -29,7 +29,7 @@ use rustyline::highlight::Highlighter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 // use rustyline::{Editor, , Result};
 use multiLineState::MultiLineState;
-use processes::lsp_invoke::{formulate_request, send_request, start_lsp};
+use processes::lsp_invoke::{formulate_request, start_lsp};
 use rustyline::completion::Completer;
 use rustyline::hint::{Hint, Hinter, HistoryHinter};
 use rustyline::{
@@ -227,23 +227,13 @@ pub fn newMain() -> Result<()> {
         })),
     );
 
-    // let h = DIYHinter {hints: diy_hints()};
-    // let mut rl: Editor<DIYHinter> = Editor::new();
-    // rl.set_helper(Some(h));
-
-    //TODO: ADD BACK
-    // rl.set_helper(Some(ha));
-    // rl.set_helper(Some(MyHelper(HistoryHinter{})));
-    //helper
-    // let h = MaskingHighlighter {masking: true, sending: tx_stdin};
-    // rl.set_helper(Some(h));
-
     //spawn the lsp
     let mut child = start_lsp();
     let mut child_writer = child.stdin.take().unwrap();
     let mut child_reader = child.stdout.take().unwrap();
 
     //spawn the flux runner
+    //TODO ADD BACK
     let mut flux_child = start_go();
 
     //thread handler
@@ -290,7 +280,7 @@ pub fn newMain() -> Result<()> {
         .stdin
         .take()
         .expect("failure getting the stdin of the flux");
-
+    //
     thread_handlers.push(thread::spawn(move || {
         loop {
             let resp = rx_user
@@ -302,6 +292,7 @@ pub fn newMain() -> Result<()> {
             write!(flux_stdin, "{}", message).expect("failed to write to the flux run time");
         }
     }));
+
 
     let mut flux_stdout = flux_child
         .stdout

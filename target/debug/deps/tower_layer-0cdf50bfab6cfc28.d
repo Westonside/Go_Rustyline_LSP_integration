@@ -1,0 +1,10 @@
+/Users/westontuescher/Documents/Influx/Project/Go_Rustyline_LSP_integration/target/debug/deps/tower_layer-0cdf50bfab6cfc28.rmeta: /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/lib.rs /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/identity.rs /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/layer_fn.rs /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/stack.rs
+
+/Users/westontuescher/Documents/Influx/Project/Go_Rustyline_LSP_integration/target/debug/deps/libtower_layer-0cdf50bfab6cfc28.rlib: /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/lib.rs /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/identity.rs /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/layer_fn.rs /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/stack.rs
+
+/Users/westontuescher/Documents/Influx/Project/Go_Rustyline_LSP_integration/target/debug/deps/tower_layer-0cdf50bfab6cfc28.d: /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/lib.rs /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/identity.rs /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/layer_fn.rs /Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/stack.rs
+
+/Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/lib.rs:
+/Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/identity.rs:
+/Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/layer_fn.rs:
+/Users/westontuescher/.cargo/registry/src/github.com-1ecc6299db9ec823/tower-layer-0.3.1/src/stack.rs:

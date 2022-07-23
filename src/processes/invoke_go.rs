@@ -12,6 +12,8 @@ use tower_lsp::jsonrpc;
 use tower_lsp::jsonrpc::RequestBuilder;
 use crate::invoke_go::OutputError::InvalidMethod;
 use crate::processes::lsp_invoke::add_headers;
+use crate::processes::process_completion::process_completions_response;
+// use process_completion::;
 
 // use std::simd::usizex2;
 
@@ -87,7 +89,9 @@ impl From<serde_json::Error> for OutputError{
                 read_exact.1 = read_exact.1 - 1;
                 if read_exact.1 == 0 {
                     //final result
-                    println!("{}", str::from_utf8(&buf).unwrap());
+                    let resp = str::from_utf8(&buf).unwrap();
+                    println!("{}", resp);
+                    process_completions_response(&resp);
                     read_exact.0 = false;
                     // break;
                 }
