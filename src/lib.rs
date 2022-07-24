@@ -5,9 +5,10 @@ mod processes;
 mod utils;
 
 use crate::processes::{invoke_go, lsp_invoke, start_go};
-use std::borrow::Cow;
+use std::borrow::{Borrow, BorrowMut, Cow};
 use std::borrow::Cow::{Borrowed, Owned};
 use std::collections::{HashSet, VecDeque};
+use std::hash::Hash;
 use std::io::{self, BufRead};
 use std::io::{BufReader, Read, Write};
 use std::ops::Add;
@@ -15,12 +16,13 @@ use std::str;
 use std::string::String;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 
 use regex::{Captures, Regex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
+use lsp_types::Command;
 
 // use rustyline_derive::{Completer, Helper, Highlighter, Hinter, Validator};
 use rustyline::error::ReadlineError;
@@ -52,8 +54,12 @@ impl Hinter for MyHelper {
             return None;
         }
 
+
+
         self.0
             .hints
+            .read()
+            .unwrap()
             .iter()
             .filter_map(|hint| {
                 // expect hint after word complete, like redis cli, add condition:
@@ -156,19 +162,6 @@ impl ConditionalEventHandler for RequestHelper {
         Some(Cmd::Insert(1, String::from("")))
         // None
     }
-    //     debug_assert_eq!(*evt, Event::from(KeyEvent::from('\t')));
-    //     if ctx.line()[..ctx.pos()]
-    //         .chars()
-    //         .rev()
-    //         .next()
-    //         .filter(|c| c.is_whitespace())
-    //         .is_some()
-    //     {
-    //         Some(Cmd::SelfInsert(n, '\t'))
-    //     } else {
-    //         None // default complete
-    //     }
-    // }
 }
 
 pub fn newMain() -> Result<()> {
@@ -190,6 +183,8 @@ pub fn newMain() -> Result<()> {
     //send from the ctrl z handler to the writer thread so that you can get suggestions
     let (tx_suggestion_process, rx_suggestion_process): (Sender<String>, Receiver<String>) =
         channel();
+
+    let (tx_sugg_sender, rx_sugg_sender): (Sender<HashSet<CommandHint>>, Receiver<HashSet<CommandHint>>) = channel();
     //when the user presses enter send to the lsp writer
 
     let mut reader_block = Arc::new(AtomicBool::new(false));
@@ -199,18 +194,16 @@ pub fn newMain() -> Result<()> {
     //spawning the editor with paste mode
     let mut paste: bool = false;
     let mut paste_state = MultiLineState::new();
-    // let mut rl = Editor::new();
     //TODO: ADD BACK
     // let mut rl = Editor::with_config(config);
 
     let mut rl = Editor::<MyHelper>::new();
 
-    // rl.set_helper(Some(MyHelper(LSPSuggestionHelper)));
 
-    // rl.set_helper(Some(MyHelper(HistoryHinter{})));
+    let storage = Arc::new(RwLock::new(HashSet::new()));
+    let vals = storage.clone();
     rl.set_helper(Some(MyHelper(LSPSuggestionHelper::LSPSuggestionHelper {
-        hints: LSPSuggestionHelper::diy_hints(),
-        rx_completion: tx_stdin, //NOT USING!
+        hints: vals,
     })));
 
     let ceh = Box::new(CompleteHintHandler);
@@ -232,8 +225,7 @@ pub fn newMain() -> Result<()> {
     let mut child_writer = child.stdin.take().unwrap();
     let mut child_reader = child.stdout.take().unwrap();
 
-    //spawn the flux runner
-    //TODO ADD BACK
+
     let mut flux_child = start_go();
 
     //thread handler
@@ -241,7 +233,6 @@ pub fn newMain() -> Result<()> {
 
     //first spawn the writing thread nothing else can access the stdin if you take
     //reads from the processed thread lsp
-
     thread_handlers.push(thread::spawn(move || {
         //read the processed request then write the request to the LSP
         loop {
@@ -270,9 +261,10 @@ pub fn newMain() -> Result<()> {
         }
     }));
 
-    //read from the LSP thread that will give the suggestions
+    //read from the LSP thread that will give the suggestions and then change the helper if need be
+    let new_hints = storage.clone();
     thread_handlers.push(thread::spawn(move || {
-        invoke_go::read_json_rpc(child_reader);
+        invoke_go::read_json_rpc(child_reader, new_hints);
     }));
 
     // getting when the user presses enter to send to the flux runner
@@ -313,7 +305,7 @@ pub fn newMain() -> Result<()> {
         .map(|x| formulate_request(x, "").unwrap())
         .collect::<VecDeque<String>>();
     thread_handlers.push(thread::spawn(move || {
-        //inintalize
+        //initialize
         while res.len() != 0 {
             if reader_block_p.load(Ordering::Relaxed) {
                 thread::sleep(Duration::from_millis(1));
@@ -342,17 +334,13 @@ pub fn newMain() -> Result<()> {
                         .expect("invalid request type"),
                 )
                 .expect("fai;ed to send to writer from ctrlz");
-
-            // tx_processed.send()
-            // tx_processed.send()
-            // let input = rx_read_stdin.recv().expect("failure reading from the user");
-            // tx_processed.send(formulate_request("didChange", &input).expect("incorrect request type in processor")).expect("failure sending to writer thread pt 2");
-            //when the user presses ctrl z then you will make a did change and then a suggestions
         }
     }));
 
     loop {
         let readline = rl.readline(">> ");
+        let a = rl.helper_mut().unwrap();
+        rl.helper().unwrap().0.print_hints();
 
         match readline {
             Ok(line) => {
@@ -364,6 +352,7 @@ pub fn newMain() -> Result<()> {
 
                     paste_state.addRecord(line.to_string());
                 }
+
 
                 println!("Line: {}", line);
                 rl.add_history_entry(line.as_str());
@@ -389,7 +378,7 @@ pub fn newMain() -> Result<()> {
                     paste_state.cleanse();
                 }
                 continue;
-                // break
+
             }
             Err(err) => {
                 println!("Error: {:?}", err);
@@ -400,24 +389,6 @@ pub fn newMain() -> Result<()> {
     for h in thread_handlers {
         h.join().expect("joining failed");
     }
-
-    // rl.save_history("history.txt")
-
     Ok(())
-
-    // Ok(())
 }
 
-pub fn call_async() {
-    newMain();
-}
-
-#[no_mangle]
-pub extern "C" fn double_input(input: i32) -> i32 {
-    input * 2
-}
-
-#[no_mangle]
-pub extern "C" fn calling_func() {
-    call_async();
-}

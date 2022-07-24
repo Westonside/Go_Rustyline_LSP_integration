@@ -1,18 +1,27 @@
+use std::collections::HashSet;
 use std::env::consts::OS;
 use std::fmt::format;
+use std::hash::Hash;
 use std::io::{Read, stdin};
 use std::process::{Child, ChildStdout, Command, Stdio};
+use std::ptr::write;
 use regex::Regex;
 use std::string::String;
 use std::str::from_utf8;
 use std::str;
+use std::sync::{Arc, Mutex, RwLock};
+use std::sync::mpsc::Sender;
 use lsp_types::{DidChangeTextDocumentParams, TextDocumentContentChangeEvent, Url, VersionedTextDocumentIdentifier};
+use rustyline::Helper;
 use serde_json::Value;
 use tower_lsp::jsonrpc;
 use tower_lsp::jsonrpc::RequestBuilder;
 use crate::invoke_go::OutputError::InvalidMethod;
+use crate::LSPSuggestionHelper::LSPSuggestionHelper;
+use crate::{CommandHint, MyHelper};
 use crate::processes::lsp_invoke::add_headers;
 use crate::processes::process_completion::process_completions_response;
+// use crate::Mutex;
 // use process_completion::;
 
 // use std::simd::usizex2;
@@ -69,7 +78,7 @@ impl From<serde_json::Error> for OutputError{
     }
 
 
-    pub fn read_json_rpc(child_stdout: ChildStdout) {
+    pub fn read_json_rpc(child_stdout: ChildStdout, mut storage: Arc<RwLock<HashSet<CommandHint>>>) {
 
 
         let re = Regex::new(r"Content-Length: ").unwrap();
@@ -91,7 +100,14 @@ impl From<serde_json::Error> for OutputError{
                     //final result
                     let resp = str::from_utf8(&buf).unwrap();
                     println!("{}", resp);
-                    process_completions_response(&resp);
+                    if let Some(val) = process_completions_response(&resp){
+                        //since this is a write operation you need to lock
+                        let mut write_lock = storage.write().unwrap();
+                        *write_lock = val;
+
+                        // *storage =
+                        println!("something");
+                    }
                     read_exact.0 = false;
                     // break;
                 }

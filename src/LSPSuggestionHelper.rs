@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::{Arc, RwLock};
 use std::sync::mpsc::{Receiver, Sender};
 use rustyline::hint::{Hint, Hinter};
 use rustyline::Context;
@@ -8,8 +9,7 @@ use rustyline_derive::{Completer, Helper, Highlighter, Validator};
 
 #[derive(Completer, Helper, Validator, Highlighter)]
 pub struct LSPSuggestionHelper {
-    pub(crate) hints: HashSet<CommandHint>,
-    pub(crate) rx_completion: Sender<String>
+    pub(crate) hints: Arc<RwLock<HashSet<CommandHint>>>,
 }
 
 #[derive(Hash, Debug, PartialEq, Eq)]
@@ -62,6 +62,8 @@ impl Hinter for LSPSuggestionHelper {
 
         //instead of going through the hash set run a function that gets from the receiver and then does it
         self.hints
+            .read()
+            .unwrap()
             .iter()
             .filter_map(|hint| {
 
@@ -74,14 +76,26 @@ impl Hinter for LSPSuggestionHelper {
             .next()
     }
 }
-
-
-pub fn diy_hints() -> HashSet<CommandHint> {
-    let mut set = HashSet::new();
-    set.insert(CommandHint::new("help", "help"));
-    set.insert(CommandHint::new("get key", "get "));
-    set.insert(CommandHint::new("set key value", "set "));
-    set.insert(CommandHint::new("hget key field", "hget "));
-    set.insert(CommandHint::new("hset key field value", "hset key field value"));
-    set
+impl LSPSuggestionHelper{
+    pub(crate) fn print_hints(&self){
+        println!("running hint runner {}", self.hints.read().unwrap().len());
+        let a = self.hints.read().unwrap();
+        a
+            .iter()
+            .for_each(|x|{
+                println!("\nhere is a hint that we have!:  {}\n", x.display);
+            })
+    }
 }
+
+
+
+// pub fn diy_hints() -> HashSet<CommandHint> {
+//     let mut set = HashSet::new();
+//     set.insert(CommandHint::new("help", "help"));
+//     set.insert(CommandHint::new("get key", "get "));
+//     set.insert(CommandHint::new("set key value", "set "));
+//     set.insert(CommandHint::new("hget key field", "hget "));
+//     set.insert(CommandHint::new("hset key field value", "hset key field value"));
+//     set
+// }
