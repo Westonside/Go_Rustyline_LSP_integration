@@ -8,7 +8,6 @@ use crate::processes::{invoke_go, lsp_invoke, start_go};
 use std::borrow::{Borrow, BorrowMut, Cow};
 use std::borrow::Cow::{Borrowed, Owned};
 use std::collections::{HashSet, VecDeque};
-use std::hash::Hash;
 use std::io::{self, BufRead};
 use std::io::{BufReader, Read, Write};
 use std::ops::Add;
@@ -16,7 +15,7 @@ use std::str;
 use std::string::String;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, RwLock, Mutex};
 
 use regex::{Captures, Regex};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,12 +23,9 @@ use std::thread;
 use std::time::Duration;
 use lsp_types::Command;
 
-// use rustyline_derive::{Completer, Helper, Highlighter, Hinter, Validator};
 use rustyline::error::ReadlineError;
-// use rustyline::{Editor, Event, EventHandler, KeyEvent, Result};
 use rustyline::highlight::Highlighter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
-// use rustyline::{Editor, , Result};
 use multiLineState::MultiLineState;
 use processes::lsp_invoke::{formulate_request, start_lsp};
 use rustyline::completion::Completer;
@@ -38,9 +34,10 @@ use rustyline::{
     Cmd, CompletionType, ConditionalEventHandler, Config, Context, EditMode, Editor, Event,
     EventContext, EventHandler, KeyCode, KeyEvent, Modifiers, RepeatCount, Result,
 };
+use rustyline::KeyCode::PageUp;
 
 use crate::utils::process_response_flux;
-use crate::LSPSuggestionHelper::CommandHint;
+use crate::LSPSuggestionHelper::{CommandHint, current_line_ends_with};
 use rustyline_derive::{Completer, Helper, Validator};
 
 #[derive(Completer, Helper, Validator)]
@@ -61,14 +58,23 @@ impl Hinter for MyHelper {
             .read()
             .unwrap()
             .iter()
-            .filter_map(|hint| {
+            .enumerate()
+            .filter_map(|(_,hint)| {
                 // expect hint after word complete, like redis cli, add condition:
                 // line.ends_with(" ")
-                if hint.display.starts_with(line) {
-                    Some(hint.suffix(pos))
-                } else {
+
+                if let Some((_,length)) = current_line_ends_with(line,&hint.display){
+                    Some(hint.suffix(length))
+                }
+                else{
                     None
                 }
+                //
+                // if hint.display.starts_with(line) {
+                //     Some(hint.suffix(pos))
+                // } else {
+                //     None
+                // }
             })
             .next()
     }
@@ -100,8 +106,10 @@ impl ConditionalEventHandler for CompleteHintHandler {
             return None; // default
         }
         if let Some(k) = evt.get(0) {
+            println!("key event: {:?}", k);
             #[allow(clippy::if_same_then_else)]
-            if *k == KeyEvent::ctrl('E') {
+            if *k == KeyEvent(KeyCode::Tab, Modifiers::NONE){
+            // if *k == KeyEvent::ctrl('E') {
                 Some(Cmd::CompleteHint)
             } else if *k == KeyEvent::alt('f') && ctx.line().len() == ctx.pos() {
                 let text = ctx.hint_text()?;
@@ -120,6 +128,9 @@ impl ConditionalEventHandler for CompleteHintHandler {
                     .collect::<String>();
 
                 Some(Cmd::Insert(1, text))
+            } else if *k == KeyEvent(KeyCode::Left, Modifiers::SHIFT) && ctx.line().len() == ctx.pos(){
+                println!("titties!");
+                Some(Cmd::ClearScreen)
             } else {
                 None
             }
@@ -131,6 +142,8 @@ impl ConditionalEventHandler for CompleteHintHandler {
 
 struct TabEventHandler;
 impl ConditionalEventHandler for TabEventHandler {
+
+
     fn handle(&self, evt: &Event, n: RepeatCount, _: bool, ctx: &EventContext) -> Option<Cmd> {
         debug_assert_eq!(*evt, Event::from(KeyEvent::from('\t')));
         if ctx.line()[..ctx.pos()]
@@ -153,11 +166,10 @@ struct RequestHelper {
 unsafe impl Sync for RequestHelper {}
 impl ConditionalEventHandler for RequestHelper {
     fn handle(&self, evt: &Event, n: RepeatCount, _: bool, ctx: &EventContext) -> Option<Cmd> {
-        println!("interrupt time");
+        // println!("interrupt time");
         self.suggestion_sender
             .send(ctx.line().to_string())
             .expect("Failed something lol");
-        println!("sent!");
         // None
         Some(Cmd::Insert(1, String::from("")))
         // None
@@ -165,14 +177,14 @@ impl ConditionalEventHandler for RequestHelper {
 }
 
 pub fn newMain() -> Result<()> {
+
     let config = rustyline::Config::builder()
         .history_ignore_space(true)
         .completion_type(CompletionType::List)
         // .edit_mode(EditMode::Emacs)
         .build();
 
-    //reading from rustyline input
-    let (tx_stdin, rx_read_stdin): (Sender<String>, Receiver<String>) = channel();
+
     //sending the processed data onwards
     let (tx_processed, rx_processed): (Sender<String>, Receiver<String>) = channel();
     //sending from when user presses enter
@@ -184,8 +196,6 @@ pub fn newMain() -> Result<()> {
     let (tx_suggestion_process, rx_suggestion_process): (Sender<String>, Receiver<String>) =
         channel();
 
-    let (tx_sugg_sender, rx_sugg_sender): (Sender<HashSet<CommandHint>>, Receiver<HashSet<CommandHint>>) = channel();
-    //when the user presses enter send to the lsp writer
 
     let mut reader_block = Arc::new(AtomicBool::new(false));
     let mut reader_block_w = Arc::clone(&reader_block);
@@ -201,18 +211,27 @@ pub fn newMain() -> Result<()> {
 
 
     let storage = Arc::new(RwLock::new(HashSet::new()));
+    let cur_line = Arc::new(Mutex::new("".to_string()));
+
+
+
+
+
     let vals = storage.clone();
     rl.set_helper(Some(MyHelper(LSPSuggestionHelper::LSPSuggestionHelper {
         hints: vals,
     })));
 
     let ceh = Box::new(CompleteHintHandler);
+    let nex = ceh.clone();
+
     rl.bind_sequence(KeyEvent::ctrl('E'), EventHandler::Conditional(ceh.clone()));
     rl.bind_sequence(KeyEvent::alt('f'), EventHandler::Conditional(ceh));
-    rl.bind_sequence(
-        KeyEvent::from('\t'),
-        EventHandler::Conditional(Box::new(TabEventHandler)),
-    );
+    rl.bind_sequence(KeyEvent(KeyCode::Tab, Modifiers::NONE), EventHandler::Conditional((nex)));
+    // rl.bind_sequence(
+    //     KeyEvent::from('\t'),
+    //     EventHandler::Conditional(Box::new(TabEventHandler)),
+    // );
     rl.bind_sequence(
         KeyEvent::ctrl('z'),
         EventHandler::Conditional(Box::new(RequestHelper {
@@ -243,7 +262,7 @@ pub fn newMain() -> Result<()> {
             let resp = rx_processed
                 .recv()
                 .expect("failure getting from processor thread");
-            println!("getting this {}", &resp);
+            // println!("getting this {}", &resp);
             write!(&mut child_writer, "{}", resp).unwrap();
             reader_block_w.swap(true, Ordering::Relaxed);
         }
@@ -253,7 +272,7 @@ pub fn newMain() -> Result<()> {
     thread_handlers.push(thread::spawn(move || {
         loop {
             let line = rx_suggest.recv().expect("failure getting from ctrl z");
-            println!("got this line from the suggestion bit {}", line);
+            // println!("got this line from the suggestion bit {}", line);
             tx_suggestion_process
                 .send(line)
                 .expect("failure sending to processor")
@@ -262,6 +281,7 @@ pub fn newMain() -> Result<()> {
     }));
 
     //read from the LSP thread that will give the suggestions and then change the helper if need be
+
     let new_hints = storage.clone();
     thread_handlers.push(thread::spawn(move || {
         invoke_go::read_json_rpc(child_reader, new_hints);
@@ -337,24 +357,22 @@ pub fn newMain() -> Result<()> {
         }
     }));
 
+    let mut clear_storage = storage.clone();
     loop {
         let readline = rl.readline(">> ");
-        let a = rl.helper_mut().unwrap();
+
         rl.helper().unwrap().0.print_hints();
 
         match readline {
             Ok(line) => {
                 // rl.add_history_entry(line.as_str());
                 if paste {
-                    //add the line to the multiline state
-                    //TODO: ADD BACK IN
-                    // rl.helper_mut().unwrap().highlighter.masking = true;
 
                     paste_state.addRecord(line.to_string());
                 }
 
 
-                println!("Line: {}", line);
+                // println!("Line: {}", line);
                 rl.add_history_entry(line.as_str());
                 if !paste {
                     tx_user.send(line).expect("Failure getting user input!");
@@ -385,6 +403,9 @@ pub fn newMain() -> Result<()> {
                 break;
             }
         }
+
+
+
     }
     for h in thread_handlers {
         h.join().expect("joining failed");

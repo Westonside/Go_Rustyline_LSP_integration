@@ -21,7 +21,7 @@ pub fn process_completions_response(resp: &str) -> Option<HashSet<CommandHint>> 
             .iter()
             .for_each(|x|{
                 if set.len() < 10{
-                    let val = x["filterText"].as_str();
+                    let val = x["insertText"].as_str();
                     if val.is_some(){
                         let add = val.unwrap();
                         set.insert(CommandHint::new(add,add));
@@ -31,13 +31,9 @@ pub fn process_completions_response(resp: &str) -> Option<HashSet<CommandHint>> 
             });
 
         return Some(set);
-        // println!("{:?} here are the completions", set);
-        // helper.0 = LSPSuggestionHelper{ hints: set};
-
-        // println!(" going deeper {:?} ", completions);
     }
     else{
-        println!("failed !");
+        // println!("failed !");
         return None
     }
 

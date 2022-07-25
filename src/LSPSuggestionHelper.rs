@@ -89,6 +89,18 @@ impl LSPSuggestionHelper{
 }
 
 
+pub(crate) fn current_line_ends_with(line: &str, comp: &str) -> Option<(usize, usize)>{
+    let mut i:i8= (line.len()-1) as i8;
+    while i > -1{
+        let up_to = &line[i as usize..];
+        if comp.starts_with(up_to){
+            return Some((i as usize,up_to.len()))
+        }
+        i = i-1;
+    }
+    None
+}
+
 
 // pub fn diy_hints() -> HashSet<CommandHint> {
 //     let mut set = HashSet::new();
