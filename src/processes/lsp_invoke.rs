@@ -1,16 +1,7 @@
 use lsp_types::notification::{
     DidChangeTextDocument, DidOpenTextDocument, Initialized, Notification, PublishDiagnostics,
 };
-use lsp_types::{
-    lsp_request, ClientCapabilities, CompletionClientCapabilities, CompletionContext,
-    CompletionItemCapability, CompletionParams, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesClientCapabilities, DidOpenTextDocumentParams, InitializeParams,
-    InitializedParams, Position, PublishDiagnosticsClientCapabilities, Range,
-    TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, TextDocumentSyncClientCapabilities, Url,
-    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
-    WorkspaceEditClientCapabilities,
-};
+use lsp_types::{lsp_request, ClientCapabilities, CompletionClientCapabilities, CompletionContext, CompletionItemCapability, CompletionParams, DidChangeTextDocumentParams, DidChangeWatchedFilesClientCapabilities, DidOpenTextDocumentParams, InitializeParams, InitializedParams, Position, PublishDiagnosticsClientCapabilities, Range, TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextDocumentSyncClientCapabilities, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEditClientCapabilities, DidChangeConfigurationClientCapabilities};
 use serde_json::Result as Result_Json;
 use serde_json::{json, json_internal, Value};
 use std::fmt::{format, Debug};
@@ -52,9 +43,17 @@ impl From<serde_json::Error> for LSP_Error {
     }
 }
 static NEXT_REQ_ID: AtomicUsize = AtomicUsize::new(1);
-pub fn formulate_request(request_type: &str, text: &str) -> Result<String, LSP_Error> {
+pub fn formulate_request(request_type: &str, text: &str, pos: usize) -> Result<String, LSP_Error> {
     let req_id = NEXT_REQ_ID.fetch_add(1, Ordering::SeqCst) as i64;
 
+
+
+    //TODO: SPECIFY THINGS YOU ARE INTERESTED IN RECEIVING
+    //leading question marks are optional
+    //use insertion text
+    //only want plaintext over snippets
+    //completion item kinds
+    //kind 5 may be
     match request_type {
         "initialize" => {
             let req: RequestBuilder = jsonrpc::Request::build(Initialize::METHOD)
@@ -74,7 +73,7 @@ pub fn formulate_request(request_type: &str, text: &str) -> Result<String, LSP_E
                                     normalizes_line_endings: None,
                                     change_annotation_support: None,
                                 }),
-                                did_change_configuration: None,
+                                did_change_configuration: Some(DidChangeConfigurationClientCapabilities{ dynamic_registration: Some(true) }),
                                 did_change_watched_files: Some(
                                     DidChangeWatchedFilesClientCapabilities {
                                         dynamic_registration: Some(true),
@@ -161,7 +160,6 @@ pub fn formulate_request(request_type: &str, text: &str) -> Result<String, LSP_E
         }
 
         "didOpen" => {
-            // println!("getting here ");
             let req: RequestBuilder = jsonrpc::Request::build(DidOpenTextDocument::METHOD).params(
                 serde_json::to_value(DidOpenTextDocumentParams {
                     text_document: TextDocumentItem {
@@ -172,37 +170,40 @@ pub fn formulate_request(request_type: &str, text: &str) -> Result<String, LSP_E
                     },
                 })?,
             );
-
             let a = serde_json::to_value(req.id(req_id).finish())?;
-
             let headed = add_headers(serde_json::to_string(&a)?);
-
             Ok(headed)
         }
         "didChange" => {
+            let basic_change =  vec![TextDocumentContentChangeEvent{
+                range: None,
+                range_length: None,
+                text: text.to_string()
+            }];
             let req: RequestBuilder = jsonrpc::Request::build(DidChangeTextDocument::METHOD)
                 .params(serde_json::to_value(DidChangeTextDocumentParams {
                     text_document: VersionedTextDocumentIdentifier {
                         uri: (Url::parse("file:///foo.flux").unwrap()),
                         version: 0,
                     },
-                    content_changes: vec![TextDocumentContentChangeEvent {
-                        range: Some(Range {
-                            start: Position {
-                                line: 0,
-                                character: 0,
-                            },
-                            end: Position {
-                                line: 1,
-                                character: 0,
-                            },
-                        }),
-                        range_length: None,
-                        text: text.to_string(),
-                    }],
+                    content_changes: basic_change,
+                    // // content_changes: vec![TextDocumentContentChangeEvent {
+                    // //     range: Some(Range {
+                    // //         start: Position {
+                    // //             line: 0,
+                    // //             character: 0,
+                    // //         },
+                    // //         end: Position {
+                    // //             line: 1,
+                    // //             character: pos as u32,
+                    // //         },
+                    // //     }),
+                    // //
+                    // //     range_length: None,
+                    // //     text: text.to_string(),
+                    // }],
                 })?);
             let a = serde_json::to_value(req.id(req_id).finish())?;
-
             let headed = add_headers(serde_json::to_string(&a)?);
             Ok(headed)
         }

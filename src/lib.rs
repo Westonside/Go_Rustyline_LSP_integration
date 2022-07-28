@@ -1,13 +1,16 @@
+#![allow(unused_imports)]
 mod multiLineState;
 // mod invoke_go;
 mod LSPSuggestionHelper;
 mod processes;
 mod utils;
-
+mod Per_Char_Highlighter;
 use crate::processes::{invoke_go, lsp_invoke, start_go};
+
 use std::borrow::{Borrow, BorrowMut, Cow};
 use std::borrow::Cow::{Borrowed, Owned};
 use std::collections::{HashSet, VecDeque};
+use std::fmt::Pointer;
 use std::io::{self, BufRead};
 use std::io::{BufReader, Read, Write};
 use std::ops::Add;
@@ -15,17 +18,18 @@ use std::str;
 use std::string::String;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{mpsc, Arc, RwLock, Mutex};
+use std::sync::{mpsc, Arc, RwLock, Mutex, RwLockReadGuard};
 
 use regex::{Captures, Regex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+use std::thread::current;
 use std::time::Duration;
 use lsp_types::Command;
 
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
-use rustyline::validate::{ValidationContext, ValidationResult, Validator};
+use rustyline::validate::{MatchingBracketValidator, ValidationContext, ValidationResult, Validator};
 use multiLineState::MultiLineState;
 use processes::lsp_invoke::{formulate_request, start_lsp};
 use rustyline::completion::Completer;
@@ -36,12 +40,21 @@ use rustyline::{
 };
 use rustyline::KeyCode::PageUp;
 
-use crate::utils::process_response_flux;
+use crate::utils::{process_response_flux, String_Buffer};
 use crate::LSPSuggestionHelper::{CommandHint, current_line_ends_with};
-use rustyline_derive::{Completer, Helper, Validator};
+use rustyline_derive::{Completer, Helper, Hinter, Highlighter, Validator};
+
+
+// struct MyHelper(LSPSuggestionHelper::LSPSuggestionHelper);
 
 #[derive(Completer, Helper, Validator)]
-struct MyHelper(LSPSuggestionHelper::LSPSuggestionHelper);
+struct MyHelper{
+    hinter: LSPSuggestionHelper::LSPSuggestionHelper,
+    highlighter: Per_Char_Highlighter::MaskingHighlighter,
+    tx_stdin: Sender<(String, usize)>
+}
+
+
 
 impl Hinter for MyHelper {
     type Hint = CommandHint;
@@ -51,50 +64,102 @@ impl Hinter for MyHelper {
             return None;
         }
 
+        let mut pos = (&CommandHint::new("", "", 0, None), 0);
+        let hints = self.hinter.hints.read().unwrap();
+
+        if hints.len() == 0 {
+            return None;
+        }
 
 
-        self.0
-            .hints
-            .read()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .filter_map(|(_,hint)| {
-                // expect hint after word complete, like redis cli, add condition:
-                // line.ends_with(" ")
+        // hints
+        //     .iter()
+        //     .for_each(|hint| {
+        //         if let Some((hint_len, overlap)) = current_line_ends_with(line, &hint.display) {
+        //             let div = overlap / hint_len;
+        //             if div > pos.1 {
+        //                 pos.1 = div;
+        //                 pos.0 = hint;
+        //             }
+        //         }
+        //     });
+        //
+        // println!("\nchoosing: {}\n", pos.0.display );
+        // return Some(pos.0.suffix(pos.1));
 
-                if let Some((_,length)) = current_line_ends_with(line,&hint.display){
-                    Some(hint.suffix(length))
-                }
-                else{
-                    None
-                }
-                //
-                // if hint.display.starts_with(line) {
-                //     Some(hint.suffix(pos))
-                // } else {
-                //     None
-                // }
-            })
-            .next()
-    }
+        println!("here are the hints length {}", hints.len());
+        if let Some(hint) = self.hinter.best_hint_get_new(line){
+        //     self.hinter
+        //         .hints
+        //         .read()
+        //         .unwrap()
+        //         .iter()
+        //         .filter_map(|x| {
+        //             if x.display == hint{
+        //
+        //             }
+        //         })
+        //
+        //
+        //     println!("returning something");
+            return Some(hint);
+        }
+        None
+        // println!("here i am");
+        // self.hinter.print_hints();
+        // None
+        //     self.hinter
+        //         .hints
+        //         .read()
+        //         .unwrap()
+        //         .iter()
+        //         .enumerate()
+        //         .filter_map(|(position,hint)| {
+        //             //get the shortest most similar one date over date/boundaries if already there don't offer completion
+        //             //drop all hints that start with the things the input ends with
+        //             if let Some((i,length)) = current_line_ends_with(line,&hint.display){
+        //
+        //                 Some(hint.suffix(length))
+        //
+        //             }
+        //             else{
+        //                 None
+        //             }
+        //
+        //         })
+        //         .next()
+        }
+
 }
 
 impl Highlighter for MyHelper {
+    fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
+        // println!("testing! {}", line );
+        Borrowed(line)
+    }
+
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
         &'s self,
         prompt: &'p str,
         default: bool,
     ) -> Cow<'b, str> {
+
         if default {
             Owned(format!("\x1b[1;32m{}\x1b[m", prompt))
         } else {
             Borrowed(prompt)
         }
     }
-
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+
         Owned(format!("\x1b[1m{}\x1b[m", hint))
+    }
+
+    fn highlight_char(&self, line: &str, pos: usize) -> bool {
+        let written = (line.parse().unwrap(), pos);
+
+        self.tx_stdin.send(written).expect("failure sending string from user stdin");
+        true
     }
 }
 
@@ -109,7 +174,7 @@ impl ConditionalEventHandler for CompleteHintHandler {
             println!("key event: {:?}", k);
             #[allow(clippy::if_same_then_else)]
             if *k == KeyEvent(KeyCode::Tab, Modifiers::NONE){
-            // if *k == KeyEvent::ctrl('E') {
+
                 Some(Cmd::CompleteHint)
             } else if *k == KeyEvent::alt('f') && ctx.line().len() == ctx.pos() {
                 let text = ctx.hint_text()?;
@@ -128,9 +193,9 @@ impl ConditionalEventHandler for CompleteHintHandler {
                     .collect::<String>();
 
                 Some(Cmd::Insert(1, text))
-            } else if *k == KeyEvent(KeyCode::Left, Modifiers::SHIFT) && ctx.line().len() == ctx.pos(){
-                println!("titties!");
+            } else if *k == KeyEvent::ctrl('K') && ctx.line().len() == ctx.pos(){
                 Some(Cmd::ClearScreen)
+
             } else {
                 None
             }
@@ -166,13 +231,27 @@ struct RequestHelper {
 unsafe impl Sync for RequestHelper {}
 impl ConditionalEventHandler for RequestHelper {
     fn handle(&self, evt: &Event, n: RepeatCount, _: bool, ctx: &EventContext) -> Option<Cmd> {
+
         // println!("interrupt time");
         self.suggestion_sender
             .send(ctx.line().to_string())
             .expect("Failed something lol");
-        // None
-        Some(Cmd::Insert(1, String::from("")))
-        // None
+
+        Some(Cmd::Noop)
+
+    }
+}
+
+
+struct RotationHelper {
+    position: Arc<RwLock<usize>>
+}
+impl ConditionalEventHandler for RotationHelper {
+    fn handle(&self, evt: &Event, n: RepeatCount, positive: bool, ctx: &EventContext) -> Option<Cmd> {
+        if let Some(k) = evt.get(0) {
+
+        }
+        Some(Cmd::Noop)
     }
 }
 
@@ -185,16 +264,23 @@ pub fn newMain() -> Result<()> {
         .build();
 
 
+    //state buffer
+    let state_buffer = Arc::new(RwLock::new(String_Buffer::new()));
+    //copy for when the user enters a valid line
+    let state_buffer_updater = state_buffer.clone();
+
     //sending the processed data onwards
     let (tx_processed, rx_processed): (Sender<String>, Receiver<String>) = channel();
     //sending from when user presses enter
     let (tx_user, rx_user): (Sender<String>, Receiver<String>) = channel();
     //
-    let (tx_suggestion, rx_suggest): (Sender<String>, Receiver<String>) = channel();
+    let (tx_suggestion, rx_suggest): (Sender<(String, usize)>, Receiver<(String, usize)>) = channel();
 
     //send from the ctrl z handler to the writer thread so that you can get suggestions
-    let (tx_suggestion_process, rx_suggestion_process): (Sender<String>, Receiver<String>) =
+    let (tx_suggestion_process, rx_suggestion_process): (Sender<(String, usize)>, Receiver<(String, usize)>) =
         channel();
+
+    let (tx_stdin, rx_stdin): (Sender<(String, usize)>, Receiver<(String, usize)>) = channel();
 
 
     let mut reader_block = Arc::new(AtomicBool::new(false));
@@ -204,40 +290,48 @@ pub fn newMain() -> Result<()> {
     //spawning the editor with paste mode
     let mut paste: bool = false;
     let mut paste_state = MultiLineState::new();
-    //TODO: ADD BACK
-    // let mut rl = Editor::with_config(config);
+
+
 
     let mut rl = Editor::<MyHelper>::new();
 
 
     let storage = Arc::new(RwLock::new(HashSet::new()));
-    let cur_line = Arc::new(Mutex::new("".to_string()));
 
 
 
 
 
     let vals = storage.clone();
-    rl.set_helper(Some(MyHelper(LSPSuggestionHelper::LSPSuggestionHelper {
+
+    let skip_pos = Arc::new(RwLock::new(None));
+    rl.set_helper(Some(MyHelper{ hinter: LSPSuggestionHelper::LSPSuggestionHelper {
         hints: vals,
-    })));
+        skip_pos:skip_pos.clone()},
+        highlighter: Per_Char_Highlighter::MaskingHighlighter { masking: true },
+        tx_stdin
+    }));
+
+
 
     let ceh = Box::new(CompleteHintHandler);
     let nex = ceh.clone();
-
+    let other = ceh.clone();
     rl.bind_sequence(KeyEvent::ctrl('E'), EventHandler::Conditional(ceh.clone()));
     rl.bind_sequence(KeyEvent::alt('f'), EventHandler::Conditional(ceh));
-    rl.bind_sequence(KeyEvent(KeyCode::Tab, Modifiers::NONE), EventHandler::Conditional((nex)));
+
+    rl.bind_sequence(KeyEvent(KeyCode::Tab, Modifiers::NONE), EventHandler::Conditional(nex));
+    rl.bind_sequence(KeyEvent::ctrl('k'), EventHandler::Conditional(other));
+
+
+
+
     // rl.bind_sequence(
-    //     KeyEvent::from('\t'),
-    //     EventHandler::Conditional(Box::new(TabEventHandler)),
+    //     KeyEvent::ctrl('z'),
+    //     EventHandler::Conditional(Box::new(RequestHelper {
+    //         suggestion_sender: (tx_suggestion),
+    //     })),
     // );
-    rl.bind_sequence(
-        KeyEvent::ctrl('z'),
-        EventHandler::Conditional(Box::new(RequestHelper {
-            suggestion_sender: (tx_suggestion),
-        })),
-    );
 
     //spawn the lsp
     let mut child = start_lsp();
@@ -263,8 +357,19 @@ pub fn newMain() -> Result<()> {
                 .recv()
                 .expect("failure getting from processor thread");
             // println!("getting this {}", &resp);
+            // println!("this is to be sent {}", resp);
             write!(&mut child_writer, "{}", resp).unwrap();
             reader_block_w.swap(true, Ordering::Relaxed);
+        }
+    }));
+
+    let tx_a = tx_suggestion.clone();
+    thread_handlers.push(thread::spawn(move ||{
+        loop {
+            let (stdin_get, pos) = rx_stdin.recv().expect("failed to get string");
+            // println!("got this string {:?}", stdin_get);
+            tx_a.send((stdin_get, pos)).expect("failed sending");
+
         }
     }));
 
@@ -322,7 +427,7 @@ pub fn newMain() -> Result<()> {
     let init = ["initialize", "initialized", "didOpen"];
     let mut res = init
         .iter()
-        .map(|x| formulate_request(x, "").unwrap())
+        .map(|x| formulate_request(x, "", 0).unwrap())
         .collect::<VecDeque<String>>();
     thread_handlers.push(thread::spawn(move || {
         //initialize
@@ -338,19 +443,20 @@ pub fn newMain() -> Result<()> {
         }
         //getting data from the user thread read from the reading
         loop {
-            let input = rx_suggestion_process
+            let (input,size) = rx_suggestion_process
                 .recv()
                 .expect("failure getting from the ctrl z thread");
-            //send twice because you need to send didupdate and then completion to the lsp
+
+            //send did change then request completion
             tx_processed
                 .send(
-                    lsp_invoke::formulate_request("didChange", &input)
+                    lsp_invoke::formulate_request("didChange", &input,size)
                         .expect("invalid request type"),
                 )
                 .expect("fai;ed to send to writer from ctrlz");
             tx_processed
                 .send(
-                    lsp_invoke::formulate_request("completion", &input)
+                    lsp_invoke::formulate_request("completion", &input,size)
                         .expect("invalid request type"),
                 )
                 .expect("fai;ed to send to writer from ctrlz");
@@ -361,7 +467,7 @@ pub fn newMain() -> Result<()> {
     loop {
         let readline = rl.readline(">> ");
 
-        rl.helper().unwrap().0.print_hints();
+        rl.helper().unwrap().hinter.print_hints();
 
         match readline {
             Ok(line) => {
@@ -375,6 +481,7 @@ pub fn newMain() -> Result<()> {
                 // println!("Line: {}", line);
                 rl.add_history_entry(line.as_str());
                 if !paste {
+
                     tx_user.send(line).expect("Failure getting user input!");
                     // tx_suggestion.send(&line).expect("failure sending to get suggestions")
                 }

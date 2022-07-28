@@ -13,28 +13,38 @@ pub fn process_completions_response(resp: &str) -> Option<HashSet<CommandHint>> 
     let json_bit: Value = serde_json::from_str::<Value>(resp).expect("failed to change");
     // println!("here is the jsson version{:?}", json_bit);
 
-    if let Some(completions) = json_bit["result"]["items"].as_array(){
+    return if let Some(completions) = json_bit["result"]["items"].as_array() {
         //create the set of completions
-        let mut set:HashSet<CommandHint> = HashSet::new();
+        // println!("there are completions in here!");
+        let mut set: HashSet<CommandHint> = HashSet::new();
 
         completions
             .iter()
-            .for_each(|x|{
-                if set.len() < 10{
-                    let val = x["insertText"].as_str();
-                    if val.is_some(){
-                        let add = val.unwrap();
-                        set.insert(CommandHint::new(add,add));
+            .for_each(|x| {
+
+                    let val = match  x["insertText"].as_str(){
+                        None => {
+                            x["label"].as_str().unwrap()
+                        }
+                        Some(val) => {val}
+                    };
+
+                    let kind = x["kind"].as_u64().unwrap();
+                    if let Some(detail)= x["detail"].as_str(){
+                        // println!("vals {} {} {}", kind,detail, val);
+
                     }
-                }
+                    else{
+                        // println!("vals {}  {}", kind, val);
+                    }
+                    // let detail = x["detail"].as_str().unwrap();
+                    set.insert(CommandHint::new(val,val,0,None));
 
             });
+        Some(set)
+    } else {
 
-        return Some(set);
-    }
-    else{
-        // println!("failed !");
-        return None
+        None
     }
 
 }
